@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "358491305800",
+    "project_id": "musicstorehn-eb251",
+    "storage_bucket": "musicstorehn-eb251.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:358491305800:android:10d30f51672ac0b53e257d",
+        "android_client_info": {
+          "package_name": "uth.pmo1.musicstorehn"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB8uJSwzxMBxHpiJZz8yyD1VkI9MNa9XOo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

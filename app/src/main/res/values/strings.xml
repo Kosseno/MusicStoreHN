@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">MusicStoreHN</string>
+    <!-- TODO: Remove or change this placeholder text -->
+    <string name="hello_blank_fragment">Hello blank fragment</string>
+    <string name="imageaction">imageaction</string>
+    <string name="image" />
+    <string name="search">search</string>
+    <string name="buscar">buscar</string>
+    <string name="buscar_canci_n">Buscar canción</string>
+</resources>
