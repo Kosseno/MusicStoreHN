@@ -1,11 +1,7 @@
 package uth.pmo1.musicstorehn;
 
-import android.Manifest;
 import android.app.AlertDialog;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
 import android.app.ProgressDialog;
-import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Bitmap;
@@ -14,7 +10,6 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
-import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -24,11 +19,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.NotificationCompat;
 import androidx.media3.common.MediaItem;
-import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.ui.PlayerView;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -38,7 +30,6 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.android.material.switchmaterial.SwitchMaterial;
 import com.google.firebase.auth.FirebaseAuth;
-import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
@@ -57,7 +48,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 
 import es.dmoral.toasty.Toasty;
 
@@ -104,7 +94,6 @@ public class FeedGrupoActivity extends AppCompatActivity {
         verificarMiembroYCreador();
         cargarContenido();
         contarMiembros();
-        escucharNovedadesGrupo();
 
         fabSubir.setOnClickListener(v -> {
             if (!esMiembro) { Toasty.info(this, "Únete para subir contenido").show(); return; }
@@ -145,7 +134,6 @@ public class FeedGrupoActivity extends AppCompatActivity {
                 esCreador = currentUserId.equals(s.child("creadorId").getValue(String.class));
                 
                 if (esCreador) {
-                    // Creador: Ocultar botón unirse/salir, mostrar eliminar y subir
                     btnUnirseSalir.setVisibility(View.GONE);
                     btnEliminar.setVisibility(View.VISIBLE);
                     fabSubir.setVisibility(View.VISIBLE);
@@ -153,7 +141,6 @@ public class FeedGrupoActivity extends AppCompatActivity {
                     adapter.setEsCreadorGrupo(true);
                     invalidateOptionsMenu();
                 } else {
-                    // No creador: Mostrar unirse/salir, ocultar eliminar
                     btnUnirseSalir.setVisibility(View.VISIBLE);
                     btnEliminar.setVisibility(View.GONE);
                     dbRef.child("Grupos").child(grupoId).child("miembros").child(currentUserId).addValueEventListener(new ValueEventListener() {
@@ -235,7 +222,6 @@ public class FeedGrupoActivity extends AppCompatActivity {
         Multimedia m = new Multimedia(id, nombre, url, tipo, currentUserId, userName, "grupo", grupoId, thumbUrl, System.currentTimeMillis());
         dbRef.child("Multimedia").child(id).setValue(m).addOnSuccessListener(unused -> {
             Toasty.success(this, "¡Compartido!").show();
-            notificarAutomaticamente(nombre);
         });
     }
 
@@ -282,7 +268,7 @@ public class FeedGrupoActivity extends AppCompatActivity {
     }
 
     private void validarPermisosYSubir() {
-        String[] p = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ? new String[]{Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.READ_MEDIA_VIDEO} : new String[]{Manifest.permission.READ_EXTERNAL_STORAGE};
+        String[] p = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ? new String[]{android.Manifest.permission.READ_MEDIA_AUDIO, android.Manifest.permission.READ_MEDIA_VIDEO} : new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE};
         Dexter.withActivity(this).withPermissions(p).withListener(new MultiplePermissionsListener() {
             @Override public void onPermissionsChecked(com.karumi.dexter.MultiplePermissionsReport r) { if (r.areAllPermissionsGranted()) elegirArchivo(); }
             @Override public void onPermissionRationaleShouldBeShown(List<PermissionRequest> p, PermissionToken t) { t.continuePermissionRequest(); }
@@ -298,12 +284,6 @@ public class FeedGrupoActivity extends AppCompatActivity {
     @Override protected void onActivityResult(int rc, int res, Intent d) {
         super.onActivityResult(rc, res, d);
         if (rc == 101 && res == RESULT_OK && d != null) subirArchivo(d.getData());
-    }
-
-    private void notificarAutomaticamente(String n) {
-        Map<String, Object> nov = new HashMap<>(); nov.put("mensaje", userName + " subió: " + n);
-        nov.put("autorId", currentUserId); nov.put("timestamp", System.currentTimeMillis());
-        dbRef.child("Grupos").child(grupoId).child("ultimaNovedad").setValue(nov);
     }
 
     private String obtenerNombreArchivo(Uri u) {
@@ -338,28 +318,6 @@ public class FeedGrupoActivity extends AppCompatActivity {
 
     private void confirmarEliminacion() {
         new AlertDialog.Builder(this).setTitle("Eliminar Grupo").setMessage("¿Eliminar?").setPositiveButton("Sí", (d, w) -> dbRef.child("Grupos").child(grupoId).removeValue().addOnSuccessListener(u -> finish())).show();
-    }
-
-    private void escucharNovedadesGrupo() {
-        dbRef.child("Grupos").child(grupoId).child("ultimaNovedad").addValueEventListener(new ValueEventListener() {
-            @Override public void onDataChange(@NonNull DataSnapshot s) {
-                if (s.exists() && !s.child("autorId").getValue().equals(currentUserId)) {
-                    mostrarNotificacionLocal("Novedad en " + grupoNombre, s.child("mensaje").getValue(String.class));
-                }
-            }
-            @Override public void onCancelled(@NonNull DatabaseError e) {}
-        });
-    }
-
-    private void mostrarNotificacionLocal(String t, String c) {
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                nm.createNotificationChannel(new NotificationChannel("gn", "Grupo", NotificationManager.IMPORTANCE_HIGH));
-            }
-            NotificationCompat.Builder b = new NotificationCompat.Builder(this, "gn").setSmallIcon(R.drawable.baseline_notifications_active_24).setContentTitle(t).setContentText(c).setAutoCancel(true);
-            nm.notify(new Random().nextInt(1000), b.build());
-        }
     }
 
     @Override public boolean onPrepareOptionsMenu(Menu menu) {

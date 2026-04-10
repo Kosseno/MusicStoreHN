@@ -10,41 +10,44 @@ import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
+
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
+
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Random;
 
 public class FCM extends FirebaseMessagingService {
 
     private static final String TAG = "FCM_Service";
+    private static final String CHANNEL_ID = "music_store_notifications";
+    private static final String CHANNEL_NAME = "Novedades Musicales";
 
     @Override
     public void onMessageReceived(@NonNull RemoteMessage remoteMessage) {
         super.onMessageReceived(remoteMessage);
-        
-        Log.d(TAG, "Mensaje recibido de: " + remoteMessage.getFrom());
 
         String titulo = "MusicStoreHN";
-        String detalle = "";
+        String detalle = null;
 
-        // Si el mensaje viene de la consola de Firebase como "Notificación"
+        // 1) Payload de notificación (enviado por la Cloud Function)
         if (remoteMessage.getNotification() != null) {
-            titulo = remoteMessage.getNotification().getTitle();
+            if (remoteMessage.getNotification().getTitle() != null) {
+                titulo = remoteMessage.getNotification().getTitle();
+            }
             detalle = remoteMessage.getNotification().getBody();
-            Log.d(TAG, "Cuerpo de notificación: " + detalle);
         }
-        
-        // Si el mensaje viene con "Datos" (Data payload)
-        if (remoteMessage.getData().size() > 0) {
-            Log.d(TAG, "Carga de datos: " + remoteMessage.getData());
-            if (remoteMessage.getData().containsKey("titulo")) {
-                titulo = remoteMessage.getData().get("titulo");
-            }
-            if (remoteMessage.getData().containsKey("detalle")) {
-                detalle = remoteMessage.getData().get("detalle");
-            } else if (remoteMessage.getData().containsKey("body")) {
-                detalle = remoteMessage.getData().get("body");
-            }
+
+        // 2) Payload de datos (respaldo o para lógica extra)
+        Map<String, String> data = remoteMessage.getData();
+        if (!data.isEmpty()) {
+            if (data.containsKey("titulo")) titulo = data.get("titulo");
+            if (data.containsKey("detalle")) detalle = data.get("detalle");
+            else if (data.containsKey("body")) detalle = data.get("body");
         }
 
         if (detalle != null && !detalle.isEmpty()) {
@@ -55,46 +58,61 @@ public class FCM extends FirebaseMessagingService {
     @Override
     public void onNewToken(@NonNull String token) {
         super.onNewToken(token);
-        Log.d(TAG, "Nuevo Token: " + token);
+        Log.d(TAG, "Nuevo Token FCM: " + token);
+        guardarTokenEnFirestore(token); // Mantenemos el nombre por compatibilidad, pero ahora guarda en RTDB
+    }
+
+    /**
+     * Guarda el token en Realtime Database para que la Cloud Function lo encuentre.
+     * Ruta: /Usuarios/{uid}/fcmToken
+     */
+    public static void guardarTokenEnFirestore(String token) {
+        FirebaseUser user = FirebaseAuth.getInstance().getCurrentUser();
+        if (user == null || token == null) return;
+
+        // Ahora guardamos en Realtime Database para coincidir con tu Cloud Function
+        FirebaseDatabase.getInstance().getReference("Usuarios")
+                .child(user.getUid())
+                .child("fcmToken")
+                .setValue(token)
+                .addOnSuccessListener(v -> Log.d(TAG, "Token guardado en Realtime Database"))
+                .addOnFailureListener(e -> Log.e(TAG, "Error guardando token en RTDB", e));
     }
 
     private void mostrarNotificacion(String titulo, String detalle) {
-        String channelId = "music_store_notifications";
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        NotificationManager nm =
+                (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel nc = new NotificationChannel(channelId, "Novedades Musicales", NotificationManager.IMPORTANCE_HIGH);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm != null) {
+            NotificationChannel nc = new NotificationChannel(
+                    CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH);
             nc.setDescription("Avisos de nuevas canciones y grupos");
             nc.enableLights(true);
             nc.enableVibration(true);
-            if (nm != null) {
-                nm.createNotificationChannel(nc);
-            }
+            nm.createNotificationChannel(nc);
         }
 
         Intent intent = new Intent(this, MenuPrincipal.class);
-        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
 
-        PendingIntent pendingIntent;
         int flags = PendingIntent.FLAG_ONE_SHOT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             flags |= PendingIntent.FLAG_IMMUTABLE;
         }
-        pendingIntent = PendingIntent.getActivity(this, 0, intent, flags);
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, flags);
 
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, channelId)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.baseline_notifications_active_24)
                 .setContentTitle(titulo)
                 .setContentText(detalle)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(detalle))
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setContentIntent(pendingIntent);
 
-        int idNotify = new Random().nextInt(8000);
-
         if (nm != null) {
-            nm.notify(idNotify, builder.build());
+            nm.notify(new Random().nextInt(8000), builder.build());
         }
     }
 }

@@ -270,7 +270,8 @@ public class GruposActivity extends AppCompatActivity {
         if (id == null || user == null) return;
 
         String uid = user.getUid();
-        Grupo nuevoGrupo = new Grupo(id, nombre, descripcion, uid, userName, System.currentTimeMillis(), esPrivado);
+        // Se agregaron null para fotoUrl y 1 para miembrosCount
+        Grupo nuevoGrupo = new Grupo(id, nombre, descripcion, uid, userName, System.currentTimeMillis(), esPrivado, null, 1);
 
         dbRef.child("Grupos").child(id).setValue(nuevoGrupo).addOnCompleteListener(task -> {
             if (task.isSuccessful()) {

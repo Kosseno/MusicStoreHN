@@ -20,6 +20,7 @@ import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
+import com.google.firebase.messaging.FirebaseMessaging;
 
 import es.dmoral.toasty.Toasty;
 
@@ -39,6 +40,7 @@ public class IniciarSesionActivity extends AppCompatActivity {
 
         // Si ya hay sesión activa de Firebase, ir directo al menú
         if (firebaseAuth.getCurrentUser() != null) {
+            actualizarTokenFCM();
             irAlMenu();
             return;
         }
@@ -112,6 +114,7 @@ public class IniciarSesionActivity extends AppCompatActivity {
                 public void onDataChange(@NonNull DataSnapshot snapshot) {
                     progressDialog.dismiss();
                     if (snapshot.exists()) {
+                        actualizarTokenFCM();
                         irAlMenu();
                     } else {
                         // El usuario existe en Auth pero no en la BD (posible cuenta a medio borrar)
@@ -130,6 +133,11 @@ public class IniciarSesionActivity extends AppCompatActivity {
         } else {
             progressDialog.dismiss();
         }
+    }
+
+    private void actualizarTokenFCM() {
+        FirebaseMessaging.getInstance().getToken()
+            .addOnSuccessListener(token -> FCM.guardarTokenEnFirestore(token));
     }
 
     private void irAlMenu() {
