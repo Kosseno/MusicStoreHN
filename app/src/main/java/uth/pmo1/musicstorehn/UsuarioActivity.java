@@ -4,8 +4,10 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
+import android.app.ProgressDialog;
 import android.content.Intent;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.widget.ImageView;
@@ -21,6 +23,8 @@ import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
 import com.squareup.picasso.Picasso;
 
+import java.io.File;
+
 import es.dmoral.toasty.Toasty;
 
 public class UsuarioActivity extends AppCompatActivity {
@@ -29,6 +33,7 @@ public class UsuarioActivity extends AppCompatActivity {
     FirebaseAuth firebaseAuth;
     FirebaseUser firebaseUser;
     DatabaseReference databaseReference;
+    ProgressDialog progressDialog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,6 +53,7 @@ public class UsuarioActivity extends AppCompatActivity {
         firebaseAuth = FirebaseAuth.getInstance();
         firebaseUser = firebaseAuth.getCurrentUser();
         databaseReference = FirebaseDatabase.getInstance().getReference("Usuarios");
+        progressDialog = new ProgressDialog(this);
 
         if (firebaseUser != null) {
             databaseReference.child(firebaseUser.getUid()).addValueEventListener(new ValueEventListener() {
@@ -57,44 +63,22 @@ public class UsuarioActivity extends AppCompatActivity {
                         String correo = String.valueOf(snapshot.child("correo").getValue());
                         String usuario = String.valueOf(snapshot.child("usuario").getValue());
                         String foto = snapshot.hasChild("fotoUrl") ? String.valueOf(snapshot.child("fotoUrl").getValue()) : "";
-                        
                         String carrera = snapshot.hasChild("carrera") ? String.valueOf(snapshot.child("carrera").getValue()) : "";
                         String descripcion = snapshot.hasChild("descripcion") ? String.valueOf(snapshot.child("descripcion").getValue()) : "";
 
                         tusuario.setText(usuario);
                         tcorreo.setText(correo);
-                        
-                        if (carrera == null || carrera.trim().isEmpty() || carrera.equals("null")) {
-                            tcarrera.setText("Añade tu carrera");
-                            tcarrera.setAlpha(0.6f);
-                        } else {
-                            tcarrera.setText(carrera);
-                            tcarrera.setAlpha(1.0f);
-                        }
-
-                        if (descripcion == null || descripcion.trim().isEmpty() || descripcion.equals("null")) {
-                            tdescripcion.setText("Cuéntanos algo sobre ti...");
-                            tdescripcion.setAlpha(0.6f);
-                        } else {
-                            tdescripcion.setText(descripcion);
-                            tdescripcion.setAlpha(1.0f);
-                        }
+                        tcarrera.setText((carrera == null || carrera.equals("null")) ? "Añade tu carrera" : carrera);
+                        tdescripcion.setText((descripcion == null || descripcion.equals("null")) ? "Cuéntanos algo sobre ti..." : descripcion);
 
                         if (foto != null && !foto.trim().isEmpty() && !foto.equals("null")) {
-                            Picasso.get()
-                                    .load(foto)
-                                    .placeholder(R.drawable.usuario)
-                                    .error(R.drawable.usuario)
-                                    .into(fotografia);
+                            Picasso.get().load(foto).placeholder(R.drawable.usuario).error(R.drawable.usuario).into(fotografia);
                         } else {
                             fotografia.setImageResource(R.drawable.usuario);
                         }
                     }
                 }
-
-                @Override
-                public void onCancelled(@NonNull DatabaseError error) {
-                }
+                @Override public void onCancelled(@NonNull DatabaseError error) {}
             });
         }
     }
@@ -108,90 +92,89 @@ public class UsuarioActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         if (item.getItemId() == R.id.editar) {
-            Intent intent = new Intent(this, EditarUsuarioActivity.class);
-            startActivity(intent);
-            overridePendingTransition(R.anim.fade_in, R.anim.fade_out);
+            startActivity(new Intent(this, EditarUsuarioActivity.class));
             finish();
             return true;
         }
-        if (item.getItemId() == R.id.cambiar_pass) {
-            cambiarContrasena();
-            return true;
-        }
         if (item.getItemId() == R.id.eliminar) {
-            eliminarCuenta();
+            confirmarEliminacion();
             return true;
         }
         return super.onOptionsItemSelected(item);
     }
 
-    private void cambiarContrasena() {
-        if (firebaseUser == null || firebaseUser.getEmail() == null) return;
-
+    private void confirmarEliminacion() {
         new AlertDialog.Builder(this)
-                .setTitle("Cambiar Contraseña")
-                .setMessage("Se enviará un enlace a tu correo (" + firebaseUser.getEmail() + ") para restablecer tu contraseña.")
-                .setPositiveButton("Enviar", (dialog, which) -> {
-                    firebaseAuth.setLanguageCode("es");
-                    firebaseAuth.sendPasswordResetEmail(firebaseUser.getEmail())
-                            .addOnSuccessListener(unused ->
-                                    Toasty.success(this, "Correo enviado! Revisa tu bandeja.", Toast.LENGTH_LONG, false).show())
-                            .addOnFailureListener(e ->
-                                    Toasty.error(this, "Error al enviar correo", Toast.LENGTH_SHORT, false).show());
+                .setTitle("Eliminar Cuenta")
+                .setMessage("¿Estás seguro de que deseas eliminar tu cuenta? Esta acción borrará tu acceso, tu perfil, tus grupos creados y tus descargas locales.")
+                .setPositiveButton("ELIMINAR", (dialog, which) -> {
+                    if (firebaseUser != null) {
+                        eliminarTodo(firebaseUser.getUid());
+                    }
                 })
-                .setNegativeButton("Cancelar", null)
+                .setNegativeButton("CANCELAR", null)
                 .show();
     }
 
-    private void eliminarCuenta() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setCancelable(false);
-        builder.setTitle("Eliminar cuenta");
-        builder.setMessage("¿Estás seguro? Esta acción eliminará tu cuenta, tus canciones y tus grupos asociados permanentemente.")
-                .setPositiveButton("Eliminar", (dialog, which) -> {
-                    String uid = firebaseUser.getUid();
-                    
-                    // 1. Buscar y eliminar grupos donde el usuario es el creador
-                    FirebaseDatabase.getInstance().getReference("Grupos").orderByChild("creadorId").equalTo(uid)
-                            .addListenerForSingleValueEvent(new ValueEventListener() {
-                                @Override
-                                public void onDataChange(@NonNull DataSnapshot snapshot) {
-                                    for (DataSnapshot ds : snapshot.getChildren()) {
-                                        ds.getRef().removeValue();
+    private void eliminarTodo(String uid) {
+        progressDialog.setMessage("Eliminando cuenta, perfil y grupos...");
+        progressDialog.setCancelable(false);
+        progressDialog.show();
+
+        // 1. Borrar archivos locales (.m4a descargados)
+        try {
+            File[] files = getCacheDir().listFiles();
+            if (files != null) {
+                for (File f : files) if (f.getName().endsWith(".m4a")) f.delete();
+            }
+            getSharedPreferences("DescargasPrefs", MODE_PRIVATE).edit().clear().apply();
+        } catch (Exception e) {
+            Log.e("DELETE_LOCAL", "Error: " + e.getMessage());
+        }
+
+        // 2. Borrar Grupos donde el usuario es creador
+        FirebaseDatabase.getInstance().getReference("Grupos").orderByChild("creadorId").equalTo(uid)
+                .addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(@NonNull DataSnapshot snapshot) {
+                        for (DataSnapshot ds : snapshot.getChildren()) {
+                            ds.getRef().removeValue();
+                        }
+                        
+                        // 3. Borrar el perfil del usuario de Realtime Database
+                        databaseReference.child(uid).removeValue().addOnCompleteListener(taskBD -> {
+                            
+                            // 4. Eliminar de Firebase Authentication
+                            if (firebaseUser != null) {
+                                firebaseUser.delete().addOnCompleteListener(taskAuth -> {
+                                    progressDialog.dismiss();
+                                    if (taskAuth.isSuccessful()) {
+                                        Toasty.success(UsuarioActivity.this, "Cuenta y grupos eliminados correctamente", Toast.LENGTH_LONG).show();
+                                    } else {
+                                        Toasty.warning(UsuarioActivity.this, "Sesión expirada. Datos borrados, pero debes re-autenticarte para borrar el acceso final.", Toast.LENGTH_LONG).show();
+                                        firebaseAuth.signOut();
                                     }
-                                    
-                                    // 2. Eliminar canciones del usuario
-                                    FirebaseDatabase.getInstance().getReference("Cancion").orderByChild("userId").equalTo(uid)
-                                            .addListenerForSingleValueEvent(new ValueEventListener() {
-                                                @Override
-                                                public void onDataChange(@NonNull DataSnapshot snapshot) {
-                                                    for (DataSnapshot ds : snapshot.getChildren()) {
-                                                        ds.getRef().removeValue();
-                                                    }
-                                                    
-                                                    // 3. Eliminar datos del perfil de usuario
-                                                    databaseReference.child(uid).removeValue().addOnSuccessListener(unused -> {
-                                                        // 4. Eliminar el usuario de la autenticación de Firebase
-                                                        firebaseUser.delete().addOnCompleteListener(task -> {
-                                                            if (task.isSuccessful()) {
-                                                                Toasty.success(UsuarioActivity.this, "Cuenta eliminada correctamente!", Toast.LENGTH_SHORT, false).show();
-                                                            } else {
-                                                                Toasty.info(UsuarioActivity.this, "Datos eliminados. Puede que necesites re-autenticarte para eliminar la cuenta de Auth.", Toast.LENGTH_LONG, false).show();
-                                                            }
-                                                            Intent intent = new Intent(UsuarioActivity.this, IniciarSesionActivity.class);
-                                                            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                                                            startActivity(intent);
-                                                            overridePendingTransition(R.anim.fade_in, R.anim.fade_out);
-                                                            finish();
-                                                        });
-                                                    });
-                                                }
-                                                @Override public void onCancelled(@NonNull DatabaseError error) {}
-                                            });
-                                }
-                                @Override public void onCancelled(@NonNull DatabaseError error) {}
-                            });
-                }).setNegativeButton("Cancelar", (dialog, which) -> dialog.dismiss());
-        builder.show();
+                                    irALogin();
+                                });
+                            } else {
+                                progressDialog.dismiss();
+                                irALogin();
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onCancelled(@NonNull DatabaseError error) {
+                        progressDialog.dismiss();
+                        Toasty.error(UsuarioActivity.this, "Error al eliminar grupos", Toast.LENGTH_SHORT).show();
+                    }
+                });
+    }
+
+    private void irALogin() {
+        Intent intent = new Intent(this, IniciarSesionActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        startActivity(intent);
+        finish();
     }
 }

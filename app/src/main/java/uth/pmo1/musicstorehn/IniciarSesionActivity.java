@@ -15,12 +15,15 @@ import android.widget.Toast;
 
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
 
 import es.dmoral.toasty.Toasty;
 
 public class IniciarSesionActivity extends AppCompatActivity {
-    // ✅ MEJORA: Se eliminó SharedPreferences para credenciales.
-    // Firebase Auth gestiona la persistencia de sesión automáticamente.
     EditText tEmail, tPass;
     TextView olvidastePass, registrate;
     Button btnIniciar;
@@ -34,7 +37,7 @@ public class IniciarSesionActivity extends AppCompatActivity {
 
         firebaseAuth = FirebaseAuth.getInstance();
 
-        // ✅ MEJORA: Si ya hay sesión activa de Firebase, ir directo al menú
+        // Si ya hay sesión activa de Firebase, ir directo al menú
         if (firebaseAuth.getCurrentUser() != null) {
             irAlMenu();
             return;
@@ -86,12 +89,11 @@ public class IniciarSesionActivity extends AppCompatActivity {
             progressDialog.setCancelable(false);
             progressDialog.show();
 
-            // ✅ MEJORA: Solo se usa Firebase Auth, no se guardan credenciales localmente
             firebaseAuth.signInWithEmailAndPassword(email, password).addOnCompleteListener(task -> {
-                progressDialog.dismiss();
                 if (task.isSuccessful()) {
-                    irAlMenu();
+                    verificarExistenciaUsuario();
                 } else {
+                    progressDialog.dismiss();
                     Toasty.error(IniciarSesionActivity.this, "Credenciales incorrectas!", Toast.LENGTH_SHORT, false).show();
                     tEmail.setText("");
                     tPass.setText("");
@@ -99,6 +101,35 @@ public class IniciarSesionActivity extends AppCompatActivity {
                 }
             });
         });
+    }
+
+    private void verificarExistenciaUsuario() {
+        FirebaseUser user = firebaseAuth.getCurrentUser();
+        if (user != null) {
+            DatabaseReference dr = FirebaseDatabase.getInstance().getReference("Usuarios").child(user.getUid());
+            dr.addListenerForSingleValueEvent(new ValueEventListener() {
+                @Override
+                public void onDataChange(@NonNull DataSnapshot snapshot) {
+                    progressDialog.dismiss();
+                    if (snapshot.exists()) {
+                        irAlMenu();
+                    } else {
+                        // El usuario existe en Auth pero no en la BD (posible cuenta a medio borrar)
+                        firebaseAuth.signOut();
+                        Toasty.error(IniciarSesionActivity.this, "Esta cuenta ya no existe.", Toast.LENGTH_SHORT, false).show();
+                    }
+                }
+
+                @Override
+                public void onCancelled(@NonNull DatabaseError error) {
+                    progressDialog.dismiss();
+                    firebaseAuth.signOut();
+                    Toasty.error(IniciarSesionActivity.this, "Error de red: " + error.getMessage(), Toast.LENGTH_SHORT, false).show();
+                }
+            });
+        } else {
+            progressDialog.dismiss();
+        }
     }
 
     private void irAlMenu() {

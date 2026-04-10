@@ -32,6 +32,7 @@ public class MenuPrincipal extends AppCompatActivity {
     DatabaseReference databaseReference;
     LinearLayout perfil, musica, musicaonline, grupos, salir;
     TextView tusuario;
+    FirebaseAuth.AuthStateListener authStateListener;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -41,9 +42,16 @@ public class MenuPrincipal extends AppCompatActivity {
         firebaseAuth = FirebaseAuth.getInstance();
         firebaseUser = firebaseAuth.getCurrentUser();
 
+        // Listener para detectar si la sesión se cierra o el usuario se elimina
+        authStateListener = firebaseAuth -> {
+            FirebaseUser user = firebaseAuth.getCurrentUser();
+            if (user == null) {
+                irALogin();
+            }
+        };
+
         if (firebaseUser == null) {
-            startActivity(new Intent(this, IniciarSesionActivity.class));
-            finish();
+            irALogin();
             return;
         }
 
@@ -88,6 +96,11 @@ public class MenuPrincipal extends AppCompatActivity {
                 if (snapshot.exists()) {
                     String usuario = "" + snapshot.child("usuario").getValue();
                     tusuario.setText(usuario);
+                } else {
+                    // Si el usuario ya no existe en la base de datos (fue eliminado), cerramos sesión
+                    if (firebaseAuth.getCurrentUser() != null) {
+                        firebaseAuth.signOut();
+                    }
                 }
             }
             @Override public void onCancelled(@NonNull DatabaseError error) {}
@@ -99,13 +112,30 @@ public class MenuPrincipal extends AppCompatActivity {
             builder.setMessage("¿Desea cerrar la sesión?")
                     .setPositiveButton("Si", (dialog, which) -> {
                         firebaseAuth.signOut();
-                        Intent intent = new Intent(MenuPrincipal.this, IniciarSesionActivity.class);
-                        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                        startActivity(intent);
-                        finish();
                     }).setNegativeButton("Cancelar", (dialog, which) -> dialog.dismiss());
             builder.show();
         });
+    }
+
+    private void irALogin() {
+        Intent intent = new Intent(MenuPrincipal.this, IniciarSesionActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        startActivity(intent);
+        finish();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        firebaseAuth.addAuthStateListener(authStateListener);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (authStateListener != null) {
+            firebaseAuth.removeAuthStateListener(authStateListener);
+        }
     }
 
     private void crearCanalNotificacion() {

@@ -64,14 +64,19 @@ public class MultimediaAdapter extends RecyclerView.Adapter<MultimediaAdapter.Vi
             holder.tvSubidoPor.setText("Subido por: " + item.getUserName() + " • " + fecha);
         }
 
-        // ✅ MEJORA: Usar Picasso para mostrar miniatura si existe URL (para consistencia con online)
-        // Como Multimedia.java no tiene campo fotoUrl explícito, intentamos usar la URL de descarga 
-        // si es un video o una imagen genérica mejorada.
-        if ("video".equals(item.getTipo())) {
-            holder.ivTipo.setImageResource(android.R.drawable.ic_menu_slideshow);
+        // ✅ MEJORA: Mostrar miniatura (carátula o video) si existe
+        if (item.getFotoUrl() != null && !item.getFotoUrl().isEmpty()) {
+            Picasso.get()
+                    .load(item.getFotoUrl())
+                    .placeholder(R.drawable.baseline_music_note_24)
+                    .error(R.drawable.baseline_music_note_24)
+                    .into(holder.ivTipo);
         } else {
-            // Intentar cargar una miniatura de música si estuviera disponible
-            holder.ivTipo.setImageResource(R.drawable.baseline_music_note_24);
+            if ("video".equals(item.getTipo())) {
+                holder.ivTipo.setImageResource(android.R.drawable.ic_menu_slideshow);
+            } else {
+                holder.ivTipo.setImageResource(R.drawable.baseline_music_note_24);
+            }
         }
 
         holder.btnPlay.setOnClickListener(v -> {

@@ -12,22 +12,24 @@ import android.Manifest;
 import android.app.ProgressDialog;
 import android.content.Intent;
 import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
+import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.google.android.gms.tasks.OnCompleteListener;
-import com.google.android.gms.tasks.Task;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
@@ -37,14 +39,15 @@ import com.google.firebase.database.ValueEventListener;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.storage.FirebaseStorage;
 import com.google.firebase.storage.StorageReference;
-import com.google.firebase.storage.UploadTask;
 import com.karumi.dexter.Dexter;
 import com.karumi.dexter.PermissionToken;
 import com.karumi.dexter.listener.PermissionDeniedResponse;
 import com.karumi.dexter.listener.PermissionGrantedResponse;
 import com.karumi.dexter.listener.PermissionRequest;
 import com.karumi.dexter.listener.single.PermissionListener;
+import com.squareup.picasso.Picasso;
 
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -88,35 +91,39 @@ public class MusicaActivity extends AppCompatActivity {
                 playerView.setVisibility(View.VISIBLE);
             }
         });
-
-        listviewMusic.setOnItemLongClickListener((parent, view, position, id) -> {
-            confirmarEliminacion(arrayListCanciones.get(position));
-            return true;
-        });
     }
 
     private void confirmarEliminacion(Cancion cancion) {
         new AlertDialog.Builder(this)
                 .setTitle("Eliminar canción")
-                .setMessage("¿Deseas eliminar '" + cancion.getNombreCancion() + "' de tu biblioteca?")
+                .setMessage("¿Deseas eliminar '" + cancion.getNombreCancion() + "' permanentemente?")
                 .setPositiveButton("Eliminar", (dialog, which) -> eliminarCancion(cancion))
                 .setNegativeButton("Cancelar", null)
                 .show();
     }
 
     private void eliminarCancion(Cancion cancion) {
+        ProgressDialog pd = new ProgressDialog(this);
+        pd.setMessage("Eliminando...");
+        pd.show();
+
+        if (cancion.getUrlCancion() != null && cancion.getUrlCancion().contains("firebase")) {
+            try { FirebaseStorage.getInstance().getReferenceFromUrl(cancion.getUrlCancion()).delete(); } catch (Exception e) {}
+        }
+        if (cancion.getFotoUrl() != null && cancion.getFotoUrl().contains("firebase")) {
+            try { FirebaseStorage.getInstance().getReferenceFromUrl(cancion.getFotoUrl()).delete(); } catch (Exception e) {}
+        }
+
         DatabaseReference dbRef = FirebaseDatabase.getInstance().getReference("Cancion");
         dbRef.orderByChild("urlCancion").equalTo(cancion.getUrlCancion())
                 .addListenerForSingleValueEvent(new ValueEventListener() {
                     @Override
                     public void onDataChange(@NonNull DataSnapshot snapshot) {
-                        for (DataSnapshot ds : snapshot.getChildren()) {
-                            ds.getRef().removeValue().addOnSuccessListener(unused -> {
-                                Toast.makeText(MusicaActivity.this, "Canción eliminada", Toast.LENGTH_SHORT).show();
-                            });
-                        }
+                        for (DataSnapshot ds : snapshot.getChildren()) ds.getRef().removeValue();
+                        pd.dismiss();
+                        Toast.makeText(MusicaActivity.this, "Canción eliminada", Toast.LENGTH_SHORT).show();
                     }
-                    @Override public void onCancelled(@NonNull DatabaseError error) {}
+                    @Override public void onCancelled(@NonNull DatabaseError error) { pd.dismiss(); }
                 });
     }
 
@@ -128,10 +135,7 @@ public class MusicaActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (player != null) {
-            player.release();
-            player = null;
-        }
+        if (player != null) player.release();
     }
 
     private void recuperarCanciones() {
@@ -158,29 +162,38 @@ public class MusicaActivity extends AppCompatActivity {
                 }
 
                 if (arrayAdapter == null) {
-                    arrayAdapter = new ArrayAdapter<Cancion>(MusicaActivity.this, android.R.layout.simple_list_item_1, arrayListCanciones) {
+                    arrayAdapter = new ArrayAdapter<Cancion>(MusicaActivity.this, R.layout.lista_view_canciones, arrayListCanciones) {
                         @NonNull
                         @Override
                         public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
-                            View view = super.getView(position, convertView, parent);
-                            TextView textView = view.findViewById(android.R.id.text1);
-                            textView.setSingleLine(true);
-                            textView.setMaxLines(1);
-                            textView.setText(getItem(position).getNombreCancion());
-                            textView.setTextColor(getResources().getColor(R.color.white));
-                            return view;
+                            if (convertView == null) convertView = LayoutInflater.from(getContext()).inflate(R.layout.lista_view_canciones, parent, false);
+                            
+                            Cancion cancion = getItem(position);
+                            TextView tvNombre = convertView.findViewById(R.id.txtNombreCancion);
+                            TextView tvArtista = convertView.findViewById(R.id.txtNombreArtista);
+                            ImageView imgCaratula = convertView.findViewById(R.id.imgPhoto);
+                            ImageView btnDelete = convertView.findViewById(R.id.imgDelete);
+                            ImageView btnAction = convertView.findViewById(R.id.imgAction);
+                            
+                            tvNombre.setText(cancion.getNombreCancion());
+                            tvArtista.setText("Subido por ti");
+                            btnDelete.setVisibility(View.VISIBLE);
+                            btnAction.setVisibility(View.GONE);
+
+                            if (cancion.getFotoUrl() != null && !cancion.getFotoUrl().isEmpty()) {
+                                Picasso.get().load(cancion.getFotoUrl()).placeholder(R.drawable.baseline_music_note_24).error(R.drawable.baseline_music_note_24).into(imgCaratula);
+                            } else {
+                                imgCaratula.setImageResource(R.drawable.baseline_music_note_24);
+                            }
+
+                            btnDelete.setOnClickListener(v -> confirmarEliminacion(cancion));
+                            return convertView;
                         }
                     };
                     listviewMusic.setAdapter(arrayAdapter);
-                } else {
-                    arrayAdapter.notifyDataSetChanged();
-                }
+                } else arrayAdapter.notifyDataSetChanged();
             }
-
-            @Override
-            public void onCancelled(@NonNull DatabaseError databaseError) {
-                Toast.makeText(MusicaActivity.this, "Error al cargar canciones: " + databaseError.getMessage(), Toast.LENGTH_SHORT).show();
-            }
+            @Override public void onCancelled(@NonNull DatabaseError databaseError) {}
         });
     }
 
@@ -195,103 +208,88 @@ public class MusicaActivity extends AppCompatActivity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == 1 && resultCode == RESULT_OK && data != null && data.getData() != null) {
             uri = data.getData();
-            try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
-                if (cursor != null && cursor.moveToFirst()) {
-                    int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
-                    nombreCancion = cursor.getString(nameIndex);
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-            if (nombreCancion == null) nombreCancion = "Cancion_" + System.currentTimeMillis();
+            obtenerNombreArchivo(uri);
             subirCancionFirebase();
         }
     }
 
+    private void obtenerNombreArchivo(Uri uri) {
+        try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                nombreCancion = cursor.getString(nameIndex);
+            }
+        } catch (Exception e) {}
+        if (nombreCancion == null) nombreCancion = "Cancion_" + System.currentTimeMillis();
+    }
+
     private void subirCancionFirebase() {
         if (uri == null || currentUserId == null) return;
-
-        StorageReference storageReference = FirebaseStorage.getInstance().getReference()
-                .child("Cancion")
-                .child(currentUserId)
-                .child(System.currentTimeMillis() + "_" + nombreCancion);
-
         ProgressDialog progressDialog = new ProgressDialog(this);
-        progressDialog.setTitle("Subiendo canción");
+        progressDialog.setTitle("Procesando canción...");
         progressDialog.setCancelable(false);
         progressDialog.show();
 
-        storageReference.putFile(uri)
-                .addOnProgressListener(snapshot -> {
-                    double progress = (100.0 * snapshot.getBytesTransferred()) / snapshot.getTotalByteCount();
-                    progressDialog.setMessage("Progreso: " + (int) progress + "%");
-                })
-                .continueWithTask(task -> {
-                    if (!task.isSuccessful()) {
-                        throw task.getException();
-                    }
-                    return storageReference.getDownloadUrl();
-                })
-                .addOnCompleteListener(task -> {
-                    progressDialog.dismiss();
-                    if (task.isSuccessful()) {
-                        Uri downloadUri = task.getResult();
-                        enviarDetallesDB(downloadUri.toString());
+        // 1. Extraer miniatura/carátula del audio
+        byte[] caratulaBytes = extraerCaratula(uri);
+
+        StorageReference baseRef = FirebaseStorage.getInstance().getReference().child("Cancion").child(currentUserId);
+        String fileName = System.currentTimeMillis() + "_" + nombreCancion;
+        StorageReference songRef = baseRef.child(fileName);
+
+        songRef.putFile(uri).addOnCompleteListener(task -> {
+            if (task.isSuccessful()) {
+                songRef.getDownloadUrl().addOnSuccessListener(songUrl -> {
+                    if (caratulaBytes != null) {
+                        StorageReference artRef = baseRef.child(fileName + "_art.jpg");
+                        artRef.putBytes(caratulaBytes).addOnSuccessListener(t -> {
+                            artRef.getDownloadUrl().addOnSuccessListener(artUrl -> {
+                                enviarDetallesDB(songUrl.toString(), artUrl.toString(), progressDialog);
+                            });
+                        }).addOnFailureListener(e -> enviarDetallesDB(songUrl.toString(), null, progressDialog));
                     } else {
-                        Toast.makeText(MusicaActivity.this, "Error: " + task.getException().getMessage(), Toast.LENGTH_LONG).show();
+                        enviarDetallesDB(songUrl.toString(), null, progressDialog);
                     }
                 });
+            } else {
+                progressDialog.dismiss();
+                Toast.makeText(this, "Error al subir", Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
-    private void enviarDetallesDB(String url) {
-        if (currentUserId == null) return;
-        Cancion cancionObj = new Cancion(nombreCancion, url, currentUserId);
+    private byte[] extraerCaratula(Uri uri) {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(this, uri);
+            byte[] art = retriever.getEmbeddedPicture();
+            retriever.release();
+            return art;
+        } catch (Exception e) { return null; }
+    }
+
+    private void enviarDetallesDB(String songUrl, String artUrl, ProgressDialog pd) {
+        Cancion cancionObj = new Cancion(nombreCancion, songUrl, currentUserId, artUrl);
         FirebaseDatabase.getInstance().getReference("Cancion").push().setValue(cancionObj)
                 .addOnCompleteListener(task -> {
-                    if (task.isSuccessful()) {
-                        Toast.makeText(MusicaActivity.this, "¡Canción subida con éxito!", Toast.LENGTH_SHORT).show();
-                    } else {
-                        Toast.makeText(MusicaActivity.this, "Error al guardar en BD", Toast.LENGTH_SHORT).show();
-                    }
+                    pd.dismiss();
+                    if (task.isSuccessful()) Toast.makeText(this, "¡Subida con éxito!", Toast.LENGTH_SHORT).show();
                 });
     }
 
     private void validarPermisos() {
-        String permission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ? 
-                Manifest.permission.READ_MEDIA_AUDIO : Manifest.permission.READ_EXTERNAL_STORAGE;
-
-        Dexter.withActivity(this)
-                .withPermission(permission)
-                .withListener(new PermissionListener() {
-                    @Override
-                    public void onPermissionGranted(PermissionGrantedResponse response) {
-                        elegirCancion();
-                    }
-
-                    @Override
-                    public void onPermissionDenied(PermissionDeniedResponse response) {
-                        Toast.makeText(MusicaActivity.this, "Permiso denegado", Toast.LENGTH_SHORT).show();
-                    }
-
-                    @Override
-                    public void onPermissionRationaleShouldBeShown(PermissionRequest permission, PermissionToken token) {
-                        token.continuePermissionRequest();
-                    }
-                }).check();
+        String p = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ? Manifest.permission.READ_MEDIA_AUDIO : Manifest.permission.READ_EXTERNAL_STORAGE;
+        Dexter.withActivity(this).withPermission(p).withListener(new PermissionListener() {
+            @Override public void onPermissionGranted(PermissionGrantedResponse r) { elegirCancion(); }
+            @Override public void onPermissionDenied(PermissionDeniedResponse r) {}
+            @Override public void onPermissionRationaleShouldBeShown(PermissionRequest p, PermissionToken t) { t.continuePermissionRequest(); }
+        }).check();
     }
 
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.menu_musica, menu);
-        return super.onCreateOptionsMenu(menu);
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
-        if (item.getItemId() == R.id.subir_archivo) {
-            validarPermisos();
-            return true;
-        }
+    @Override public boolean onCreateOptionsMenu(Menu menu) { getMenuInflater().inflate(R.menu.menu_musica, menu); return true; }
+    @Override public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+        if (item.getItemId() == R.id.subir_archivo) { validarPermisos(); return true; }
+        if (item.getItemId() == android.R.id.home) { finish(); return true; }
         return super.onOptionsItemSelected(item);
     }
 }
