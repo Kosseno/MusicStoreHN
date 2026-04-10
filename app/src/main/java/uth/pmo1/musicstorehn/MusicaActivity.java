@@ -2,6 +2,7 @@ package uth.pmo1.musicstorehn;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.media3.common.MediaItem;
 import androidx.media3.exoplayer.ExoPlayer;
@@ -52,8 +53,8 @@ public class MusicaActivity extends AppCompatActivity {
     private Uri uri;
     private String nombreCancion;
     private ListView listviewMusic;
-    private final ArrayList<String> arrayListNombreCanciones = new ArrayList<>();
-    private ArrayAdapter<String> arrayAdapter;
+    private final ArrayList<Cancion> arrayListCanciones = new ArrayList<>();
+    private ArrayAdapter<Cancion> arrayAdapter;
     
     private ExoPlayer player;
     private PlayerView playerView;
@@ -87,6 +88,36 @@ public class MusicaActivity extends AppCompatActivity {
                 playerView.setVisibility(View.VISIBLE);
             }
         });
+
+        listviewMusic.setOnItemLongClickListener((parent, view, position, id) -> {
+            confirmarEliminacion(arrayListCanciones.get(position));
+            return true;
+        });
+    }
+
+    private void confirmarEliminacion(Cancion cancion) {
+        new AlertDialog.Builder(this)
+                .setTitle("Eliminar canción")
+                .setMessage("¿Deseas eliminar '" + cancion.getNombreCancion() + "' de tu biblioteca?")
+                .setPositiveButton("Eliminar", (dialog, which) -> eliminarCancion(cancion))
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    private void eliminarCancion(Cancion cancion) {
+        DatabaseReference dbRef = FirebaseDatabase.getInstance().getReference("Cancion");
+        dbRef.orderByChild("urlCancion").equalTo(cancion.getUrlCancion())
+                .addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(@NonNull DataSnapshot snapshot) {
+                        for (DataSnapshot ds : snapshot.getChildren()) {
+                            ds.getRef().removeValue().addOnSuccessListener(unused -> {
+                                Toast.makeText(MusicaActivity.this, "Canción eliminada", Toast.LENGTH_SHORT).show();
+                            });
+                        }
+                    }
+                    @Override public void onCancelled(@NonNull DatabaseError error) {}
+                });
     }
 
     private void initializePlayer() {
@@ -110,13 +141,13 @@ public class MusicaActivity extends AppCompatActivity {
         databaseReference.orderByChild("userId").equalTo(currentUserId).addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
-                arrayListNombreCanciones.clear();
+                arrayListCanciones.clear();
                 List<MediaItem> mediaItems = new ArrayList<>();
 
                 for (DataSnapshot ds : dataSnapshot.getChildren()) {
                     Cancion cancionObj = ds.getValue(Cancion.class);
                     if (cancionObj != null && cancionObj.getUrlCancion() != null) {
-                        arrayListNombreCanciones.add(cancionObj.getNombreCancion());
+                        arrayListCanciones.add(cancionObj);
                         mediaItems.add(MediaItem.fromUri(cancionObj.getUrlCancion()));
                     }
                 }
@@ -127,7 +158,7 @@ public class MusicaActivity extends AppCompatActivity {
                 }
 
                 if (arrayAdapter == null) {
-                    arrayAdapter = new ArrayAdapter<String>(MusicaActivity.this, android.R.layout.simple_list_item_1, arrayListNombreCanciones) {
+                    arrayAdapter = new ArrayAdapter<Cancion>(MusicaActivity.this, android.R.layout.simple_list_item_1, arrayListCanciones) {
                         @NonNull
                         @Override
                         public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
@@ -135,6 +166,7 @@ public class MusicaActivity extends AppCompatActivity {
                             TextView textView = view.findViewById(android.R.id.text1);
                             textView.setSingleLine(true);
                             textView.setMaxLines(1);
+                            textView.setText(getItem(position).getNombreCancion());
                             textView.setTextColor(getResources().getColor(R.color.white));
                             return view;
                         }

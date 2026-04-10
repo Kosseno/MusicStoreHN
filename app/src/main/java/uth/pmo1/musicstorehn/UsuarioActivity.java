@@ -64,7 +64,6 @@ public class UsuarioActivity extends AppCompatActivity {
                         tusuario.setText(usuario);
                         tcorreo.setText(correo);
                         
-                        // Validar Carrera
                         if (carrera == null || carrera.trim().isEmpty() || carrera.equals("null")) {
                             tcarrera.setText("Añade tu carrera");
                             tcarrera.setAlpha(0.6f);
@@ -73,7 +72,6 @@ public class UsuarioActivity extends AppCompatActivity {
                             tcarrera.setAlpha(1.0f);
                         }
 
-                        // Validar Descripción
                         if (descripcion == null || descripcion.trim().isEmpty() || descripcion.equals("null")) {
                             tdescripcion.setText("Cuéntanos algo sobre ti...");
                             tdescripcion.setAlpha(0.6f);
@@ -82,7 +80,6 @@ public class UsuarioActivity extends AppCompatActivity {
                             tdescripcion.setAlpha(1.0f);
                         }
 
-                        // Validar Foto
                         if (foto != null && !foto.trim().isEmpty() && !foto.equals("null")) {
                             Picasso.get()
                                     .load(foto)
@@ -150,22 +147,50 @@ public class UsuarioActivity extends AppCompatActivity {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setCancelable(false);
         builder.setTitle("Eliminar cuenta");
-        builder.setMessage("¿Estás seguro? Esta acción eliminará tu cuenta y todos tus datos permanentemente.")
+        builder.setMessage("¿Estás seguro? Esta acción eliminará tu cuenta, tus canciones y tus grupos asociados permanentemente.")
                 .setPositiveButton("Eliminar", (dialog, which) -> {
-                    databaseReference.child(firebaseUser.getUid()).removeValue().addOnSuccessListener(unused -> {
-                        firebaseUser.delete().addOnCompleteListener(task -> {
-                            if (task.isSuccessful()) {
-                                Toasty.success(UsuarioActivity.this, "Cuenta eliminada correctamente!", Toast.LENGTH_SHORT, false).show();
-                            } else {
-                                Toasty.info(UsuarioActivity.this, "Datos eliminados. Puede que necesites re-autenticarte para eliminar la cuenta de Auth.", Toast.LENGTH_LONG, false).show();
-                            }
-                            Intent intent = new Intent(UsuarioActivity.this, IniciarSesionActivity.class);
-                            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                            startActivity(intent);
-                            overridePendingTransition(R.anim.fade_in, R.anim.fade_out);
-                            finish();
-                        });
-                    });
+                    String uid = firebaseUser.getUid();
+                    
+                    // 1. Buscar y eliminar grupos donde el usuario es el creador
+                    FirebaseDatabase.getInstance().getReference("Grupos").orderByChild("creadorId").equalTo(uid)
+                            .addListenerForSingleValueEvent(new ValueEventListener() {
+                                @Override
+                                public void onDataChange(@NonNull DataSnapshot snapshot) {
+                                    for (DataSnapshot ds : snapshot.getChildren()) {
+                                        ds.getRef().removeValue();
+                                    }
+                                    
+                                    // 2. Eliminar canciones del usuario
+                                    FirebaseDatabase.getInstance().getReference("Cancion").orderByChild("userId").equalTo(uid)
+                                            .addListenerForSingleValueEvent(new ValueEventListener() {
+                                                @Override
+                                                public void onDataChange(@NonNull DataSnapshot snapshot) {
+                                                    for (DataSnapshot ds : snapshot.getChildren()) {
+                                                        ds.getRef().removeValue();
+                                                    }
+                                                    
+                                                    // 3. Eliminar datos del perfil de usuario
+                                                    databaseReference.child(uid).removeValue().addOnSuccessListener(unused -> {
+                                                        // 4. Eliminar el usuario de la autenticación de Firebase
+                                                        firebaseUser.delete().addOnCompleteListener(task -> {
+                                                            if (task.isSuccessful()) {
+                                                                Toasty.success(UsuarioActivity.this, "Cuenta eliminada correctamente!", Toast.LENGTH_SHORT, false).show();
+                                                            } else {
+                                                                Toasty.info(UsuarioActivity.this, "Datos eliminados. Puede que necesites re-autenticarte para eliminar la cuenta de Auth.", Toast.LENGTH_LONG, false).show();
+                                                            }
+                                                            Intent intent = new Intent(UsuarioActivity.this, IniciarSesionActivity.class);
+                                                            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                                                            startActivity(intent);
+                                                            overridePendingTransition(R.anim.fade_in, R.anim.fade_out);
+                                                            finish();
+                                                        });
+                                                    });
+                                                }
+                                                @Override public void onCancelled(@NonNull DatabaseError error) {}
+                                            });
+                                }
+                                @Override public void onCancelled(@NonNull DatabaseError error) {}
+                            });
                 }).setNegativeButton("Cancelar", (dialog, which) -> dialog.dismiss());
         builder.show();
     }

@@ -8,6 +8,8 @@ import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 
 import android.Manifest;
+import android.app.AlertDialog;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -27,6 +29,8 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import com.squareup.picasso.Picasso;
 
 import java.io.BufferedInputStream;
@@ -52,10 +56,8 @@ public class MusicaOnlineActivity extends AppCompatActivity {
     private List<Result> results;
     private AdapterListMusica adapter;
 
-    // ✅ MEJORA: ExoPlayer en vez de MediaPlayer para consistencia con el resto de la app
     private ExoPlayer player;
 
-    // ✅ MEJORA: Mini-player persistente en la parte inferior
     private LinearLayout miniPlayerLayout;
     private ImageView imgMiniArt;
     private TextView tvMiniTitle, tvMiniArtist, tvMiniTime;
@@ -63,13 +65,14 @@ public class MusicaOnlineActivity extends AppCompatActivity {
     private SeekBar seekBarMini;
     private ProgressBar progressBarSearch;
 
-    // Estado
     private int currentPlayingIndex = -1;
     private int currentDownloadingIndex = -1;
     private Handler seekHandler;
     private Runnable seekRunnable;
 
     private static final int REQUEST_CODE = 200;
+    private static final String PREFS_NAME = "DescargasPrefs";
+    private static final String KEY_DESCARGAS = "lista_descargas";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -88,14 +91,78 @@ public class MusicaOnlineActivity extends AppCompatActivity {
         service = new AppleMusicService(this);
         results = new ArrayList<>();
         seekHandler = new Handler(Looper.getMainLooper());
+
+        adapter = new AdapterListMusica(this, results, song -> confirmarEliminacion(song));
+        listViewItems.setAdapter(adapter);
+
+        cargarCancionesDescargadas();
+    }
+
+    private void cargarCancionesDescargadas() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String json = prefs.getString(KEY_DESCARGAS, null);
+        results.clear();
+        if (json != null) {
+            Gson gson = new Gson();
+            List<Result> descargas = gson.fromJson(json, new TypeToken<List<Result>>(){}.getType());
+            for (Result r : descargas) {
+                File file = new File(getCacheDir() + "/" + r.getTrackId() + ".m4a");
+                if (file.exists()) {
+                    r.setState(2);
+                    results.add(r);
+                }
+            }
+        }
+        if (adapter != null) adapter.notifyDataSetChanged();
+    }
+
+    private void confirmarEliminacion(Result song) {
+        new AlertDialog.Builder(this)
+                .setTitle("Eliminar descarga")
+                .setMessage("¿Estás seguro de que quieres eliminar \"" + song.getTrackName() + "\"?")
+                .setPositiveButton("Eliminar", (dialog, which) -> eliminarCancion(song))
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    private void eliminarCancion(Result song) {
+        File file = new File(getCacheDir() + "/" + song.getTrackId() + ".m4a");
+        if (file.exists() && file.delete()) {
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            Gson gson = new Gson();
+            String json = prefs.getString(KEY_DESCARGAS, null);
+            if (json != null) {
+                List<Result> descargas = gson.fromJson(json, new TypeToken<List<Result>>(){}.getType());
+                descargas.removeIf(r -> r.getTrackId() == song.getTrackId());
+                prefs.edit().putString(KEY_DESCARGAS, gson.toJson(descargas)).apply();
+            }
+            
+            if (txtSearch.getText().toString().trim().isEmpty()) {
+                cargarCancionesDescargadas();
+            } else {
+                song.setState(1); // Cambiar a "listo para descargar" en la búsqueda actual
+                notifyAdapter();
+            }
+            Toasty.success(this, "Descarga eliminada", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void guardarDescargaEnPrefs(Result song) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        Gson gson = new Gson();
+        String json = prefs.getString(KEY_DESCARGAS, null);
+        List<Result> descargas = json == null ? new ArrayList<>() : gson.fromJson(json, new TypeToken<List<Result>>(){}.getType());
+        
+        if (descargas.stream().noneMatch(r -> r.getTrackId() == song.getTrackId())) {
+            descargas.add(song);
+            prefs.edit().putString(KEY_DESCARGAS, gson.toJson(descargas)).apply();
+        }
     }
 
     private void initViews() {
         txtSearch = findViewById(R.id.txtBuscar);
         listViewItems = findViewById(R.id.listViewItems);
         progressBarSearch = findViewById(R.id.progressBarSearch);
-
-        // Mini Player views
         miniPlayerLayout = findViewById(R.id.miniPlayerLayout);
         imgMiniArt = findViewById(R.id.imgMiniArt);
         tvMiniTitle = findViewById(R.id.tvMiniTitle);
@@ -108,413 +175,180 @@ public class MusicaOnlineActivity extends AppCompatActivity {
 
     private void initPlayer() {
         player = new ExoPlayer.Builder(this).build();
-
         player.addListener(new Player.Listener() {
             @Override
             public void onPlaybackStateChanged(int playbackState) {
-                if (playbackState == Player.STATE_ENDED) {
-                    onTrackFinished();
-                } else if (playbackState == Player.STATE_READY) {
-                    // Actualizar duración total en el seek bar
-                    long duration = player.getDuration();
-                    if (duration > 0) {
-                        seekBarMini.setMax((int) duration);
-                    }
+                if (playbackState == Player.STATE_ENDED) onTrackFinished();
+                else if (playbackState == Player.STATE_READY) {
+                    if (player.getDuration() > 0) seekBarMini.setMax((int) player.getDuration());
                     startSeekBarUpdate();
                 }
             }
-
             @Override
             public void onIsPlayingChanged(boolean isPlaying) {
-                btnMiniPlayPause.setImageResource(isPlaying ?
-                        R.drawable.baseline_pause_circle_outline_24 :
-                        R.drawable.baseline_play_circle_outline_24);
-                if (isPlaying) {
-                    startSeekBarUpdate();
-                } else {
-                    stopSeekBarUpdate();
-                }
+                btnMiniPlayPause.setImageResource(isPlaying ? R.drawable.baseline_pause_circle_outline_24 : R.drawable.baseline_play_circle_outline_24);
+                if (isPlaying) startSeekBarUpdate(); else stopSeekBarUpdate();
             }
         });
     }
 
     private void initEvents() {
-        // Buscar con Enter del teclado
         txtSearch.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                ejecutarBusqueda();
-                return true;
-            }
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) { ejecutarBusqueda(); return true; }
             return false;
         });
 
         listViewItems.setOnItemClickListener((adapterView, view, i, l) -> {
             if (results == null || i >= results.size()) return;
             Result song = results.get(i);
-            if (song == null) return;
-
             String destFilename = getCacheDir() + "/" + song.getTrackId() + ".m4a";
-            int state = song.getState();
-
-            switch (state) {
-                case 0: // No descargado — sin acción aún (el adapter muestra el botón de descarga)
-                case 1: // Listo para descargar
-                    if (currentDownloadingIndex >= 0) {
-                        Toasty.info(this, "Espera a que termine la descarga actual", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    descargarCancion(song, destFilename, i);
-                    break;
-                case 2: // Descargado — reproducir
-                    reproducirCancion(song, destFilename, i);
-                    break;
-                case 3: // Reproduciendo — pausar
-                    pausarReproduccion();
-                    song.setState(4); // Estado "pausado"
-                    notifyAdapter();
-                    break;
-                case 4: // Pausado — reanudar
-                    reanudarReproduccion();
-                    song.setState(3);
-                    notifyAdapter();
-                    break;
+            switch (song.getState()) {
+                case 1: if (currentDownloadingIndex < 0) descargarCancion(song, destFilename, i); break;
+                case 2: reproducirCancion(song, destFilename, i); break;
+                case 3: pausarReproduccion(); song.setState(4); notifyAdapter(); break;
+                case 4: reanudarReproduccion(); song.setState(3); notifyAdapter(); break;
             }
         });
 
-        // Mini Player controles
         btnMiniPlayPause.setOnClickListener(v -> {
             if (player == null) return;
             if (player.isPlaying()) {
                 player.pause();
-                if (currentPlayingIndex >= 0 && currentPlayingIndex < results.size()) {
-                    results.get(currentPlayingIndex).setState(4);
-                    notifyAdapter();
-                }
+                if (currentPlayingIndex >= 0) { results.get(currentPlayingIndex).setState(4); notifyAdapter(); }
             } else {
                 player.play();
-                if (currentPlayingIndex >= 0 && currentPlayingIndex < results.size()) {
-                    results.get(currentPlayingIndex).setState(3);
-                    notifyAdapter();
-                }
+                if (currentPlayingIndex >= 0) { results.get(currentPlayingIndex).setState(3); notifyAdapter(); }
             }
         });
-
-        btnMiniClose.setOnClickListener(v -> {
-            detenerReproduccion();
-            ocultarMiniPlayer();
-        });
-
+        btnMiniClose.setOnClickListener(v -> { detenerReproduccion(); ocultarMiniPlayer(); });
         seekBarMini.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && player != null) {
-                    player.seekTo(progress);
-                }
-            }
-
-            @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {
-                stopSeekBarUpdate();
-            }
-
-            @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {
-                startSeekBarUpdate();
-            }
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) { if (fromUser && player != null) player.seekTo(progress); }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { stopSeekBarUpdate(); }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { startSeekBarUpdate(); }
         });
     }
 
-    // ========== BÚSQUEDA ==========
-
-    public void buscarCancion(View view) {
-        ejecutarBusqueda();
-    }
+    public void buscarCancion(View view) { ejecutarBusqueda(); }
 
     private void ejecutarBusqueda() {
         String termino = txtSearch.getText().toString().trim();
-        if (termino.isEmpty()) {
-            Toasty.info(this, "Escribe el nombre de una canción o artista", Toast.LENGTH_SHORT, false).show();
-            return;
-        }
-
-        detenerReproduccion();
-        ocultarMiniPlayer();
-        ocultarTeclado();
-
+        if (termino.isEmpty()) { cargarCancionesDescargadas(); ocultarTeclado(); return; }
+        detenerReproduccion(); ocultarMiniPlayer(); ocultarTeclado();
         if (progressBarSearch != null) progressBarSearch.setVisibility(View.VISIBLE);
 
         service.searchSongsByTerm(termino, (isNetworkError, statusCode, root) -> {
             runOnUiThread(() -> {
                 if (progressBarSearch != null) progressBarSearch.setVisibility(View.GONE);
-
                 if (!isNetworkError && statusCode == 200 && root != null && root.getResults() != null) {
-                    results = new ArrayList<Result>(root.getResults());
-
-                    // Marcar las canciones ya descargadas
+                    results.clear(); results.addAll(root.getResults());
                     for (Result r : results) {
-                        String path = getCacheDir() + "/" + r.getTrackId() + ".m4a";
-                        if (new File(path).exists()) {
-                            r.setState(2); // Ya descargada
-                        } else {
-                            r.setState(1); // Lista para descargar
-                        }
+                        r.setState(new File(getCacheDir() + "/" + r.getTrackId() + ".m4a").exists() ? 2 : 1);
                     }
-
-                    adapter = new AdapterListMusica(this, results);
-                    listViewItems.setAdapter(adapter);
-
-                    if (results.isEmpty()) {
-                        Toasty.info(this, "Sin resultados para \"" + termino + "\"", Toast.LENGTH_SHORT).show();
-                    }
-                } else {
-                    Toasty.error(this, "Error de conexión. Verifica tu internet.", Toast.LENGTH_SHORT).show();
-                }
+                    if (adapter != null) adapter.notifyDataSetChanged();
+                } else Toasty.error(this, "Error de conexión", Toast.LENGTH_SHORT).show();
             });
         });
     }
 
-    // ========== DESCARGA ==========
-
     private void descargarCancion(Result song, String destFilename, int position) {
-        currentDownloadingIndex = position;
-        song.setState(5); // Estado "descargando"
-        notifyAdapter();
-
-        Toasty.info(this, "Descargando: " + song.getTrackName(), Toast.LENGTH_SHORT, false).show();
-
+        currentDownloadingIndex = position; song.setState(5); notifyAdapter();
+        Toasty.info(this, "Descargando...", Toast.LENGTH_SHORT, false).show();
         new Thread(() -> {
             HttpURLConnection connection = null;
             try {
                 URL url = new URL(song.getPreviewUrl());
                 connection = (HttpURLConnection) url.openConnection();
-                connection.setConnectTimeout(15000);
-                connection.setReadTimeout(15000);
-                connection.connect();
-
                 if (connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
-                    int totalSize = connection.getContentLength();
                     InputStream input = new BufferedInputStream(url.openStream(), 8192);
                     FileOutputStream output = new FileOutputStream(destFilename);
-
-                    byte[] buffer = new byte[4096];
-                    int count;
-                    long downloaded = 0;
-
-                    while ((count = input.read(buffer)) != -1) {
-                        output.write(buffer, 0, count);
-                        downloaded += count;
-
-                        // ✅ MEJORA: Progreso de descarga visible (actualizar cada 10%)
-                        if (totalSize > 0) {
-                            int progress = (int) ((downloaded * 100) / totalSize);
-                            // Se podría actualizar un ProgressBar aquí si se agrega al item
-                        }
-                    }
-
-                    output.flush();
-                    output.close();
-                    input.close();
-
+                    byte[] buffer = new byte[4096]; int count;
+                    while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                    output.flush(); output.close(); input.close();
                     runOnUiThread(() -> {
-                        song.setState(2); // Descargada y lista para reproducir
-                        currentDownloadingIndex = -1;
-                        notifyAdapter();
-                        Toasty.success(this, song.getTrackName() + " descargada", Toast.LENGTH_SHORT, false).show();
-                    });
-                } else {
-                    runOnUiThread(() -> {
-                        song.setState(1);
-                        currentDownloadingIndex = -1;
-                        notifyAdapter();
-                        Toasty.error(this, "Error del servidor", Toast.LENGTH_SHORT).show();
+                        song.setState(2); currentDownloadingIndex = -1;
+                        guardarDescargaEnPrefs(song); notifyAdapter();
+                        Toasty.success(this, "Descargada", Toast.LENGTH_SHORT, false).show();
                     });
                 }
             } catch (Exception e) {
-                Log.e("Download", "Error: " + e.getMessage());
-                // Limpiar archivo incompleto
                 new File(destFilename).delete();
-                runOnUiThread(() -> {
-                    song.setState(1);
-                    currentDownloadingIndex = -1;
-                    notifyAdapter();
-                    Toasty.error(this, "Error en la descarga", Toast.LENGTH_SHORT).show();
-                });
-            } finally {
-                if (connection != null) connection.disconnect();
-            }
+                runOnUiThread(() -> { song.setState(1); currentDownloadingIndex = -1; notifyAdapter(); });
+            } finally { if (connection != null) connection.disconnect(); }
         }).start();
     }
 
-    // ========== REPRODUCCIÓN ==========
-
     private void reproducirCancion(Result song, String filePath, int position) {
-        // Restaurar estado de la canción anterior
-        if (currentPlayingIndex >= 0 && currentPlayingIndex < results.size()) {
+        if (currentPlayingIndex >= 0) {
             Result prev = results.get(currentPlayingIndex);
-            if (prev.getState() == 3 || prev.getState() == 4) {
-                prev.setState(2);
-            }
+            if (prev.getState() == 3 || prev.getState() == 4) prev.setState(2);
         }
-
-        File file = new File(filePath);
-        if (!file.exists()) {
-            Toasty.error(this, "Archivo no encontrado. Descárgalo de nuevo.", Toast.LENGTH_SHORT).show();
-            song.setState(1);
-            notifyAdapter();
-            return;
-        }
-
-        // Reproducir con ExoPlayer
-        player.stop();
-        player.clearMediaItems();
-        player.setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(file)));
-        player.prepare();
-        player.play();
-
-        currentPlayingIndex = position;
-        song.setState(3); // Reproduciendo
-        notifyAdapter();
-
+        player.stop(); player.clearMediaItems();
+        player.setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(new File(filePath))));
+        player.prepare(); player.play();
+        currentPlayingIndex = position; song.setState(3); notifyAdapter();
         mostrarMiniPlayer(song);
     }
 
-    private void pausarReproduccion() {
-        if (player != null && player.isPlaying()) {
-            player.pause();
-        }
-    }
-
-    private void reanudarReproduccion() {
-        if (player != null) {
-            player.play();
-        }
-    }
-
+    private void pausarReproduccion() { if (player != null) player.pause(); }
+    private void reanudarReproduccion() { if (player != null) player.play(); }
     private void detenerReproduccion() {
-        if (player != null) {
-            player.stop();
-            player.clearMediaItems();
-        }
-        if (currentPlayingIndex >= 0 && currentPlayingIndex < results.size()) {
+        if (player != null) { player.stop(); player.clearMediaItems(); }
+        if (currentPlayingIndex >= 0) {
             Result song = results.get(currentPlayingIndex);
-            if (song.getState() == 3 || song.getState() == 4) {
-                song.setState(2);
-                notifyAdapter();
-            }
+            if (song.getState() == 3 || song.getState() == 4) { song.setState(2); notifyAdapter(); }
         }
-        currentPlayingIndex = -1;
-        stopSeekBarUpdate();
+        currentPlayingIndex = -1; stopSeekBarUpdate();
     }
 
     private void onTrackFinished() {
-        if (currentPlayingIndex >= 0 && currentPlayingIndex < results.size()) {
-            results.get(currentPlayingIndex).setState(2);
-            notifyAdapter();
-        }
-        currentPlayingIndex = -1;
-        ocultarMiniPlayer();
-        stopSeekBarUpdate();
+        if (currentPlayingIndex >= 0) { results.get(currentPlayingIndex).setState(2); notifyAdapter(); }
+        currentPlayingIndex = -1; ocultarMiniPlayer(); stopSeekBarUpdate();
     }
-
-    // ========== MINI PLAYER ==========
 
     private void mostrarMiniPlayer(Result song) {
         miniPlayerLayout.setVisibility(View.VISIBLE);
-        tvMiniTitle.setText(song.getTrackName());
-        tvMiniArtist.setText(song.getArtistName());
+        tvMiniTitle.setText(song.getTrackName()); tvMiniArtist.setText(song.getArtistName());
         btnMiniPlayPause.setImageResource(R.drawable.baseline_pause_circle_outline_24);
-
-        // Cargar artwork
         if (song.getArtworkUrl100() != null && !song.getArtworkUrl100().isEmpty()) {
-            Picasso.get()
-                    .load(song.getArtworkUrl100())
-                    .placeholder(R.drawable.baseline_music_note_24)
-                    .error(R.drawable.baseline_music_note_24)
-                    .into(imgMiniArt);
-        }
-
+            Picasso.get().load(song.getArtworkUrl100()).placeholder(R.drawable.baseline_music_note_24).into(imgMiniArt);
+        } else imgMiniArt.setImageResource(R.drawable.baseline_music_note_24);
         seekBarMini.setProgress(0);
-        seekBarMini.setMax(100);
     }
 
-    private void ocultarMiniPlayer() {
-        miniPlayerLayout.setVisibility(View.GONE);
-        stopSeekBarUpdate();
-    }
-
-    // ========== SEEK BAR ==========
+    private void ocultarMiniPlayer() { miniPlayerLayout.setVisibility(View.GONE); stopSeekBarUpdate(); }
 
     private void startSeekBarUpdate() {
         stopSeekBarUpdate();
-        seekRunnable = new Runnable() {
-            @Override
-            public void run() {
-                if (player != null && player.isPlaying()) {
-                    long position = player.getCurrentPosition();
-                    long duration = player.getDuration();
-
-                    if (duration > 0) {
-                        seekBarMini.setMax((int) duration);
-                        seekBarMini.setProgress((int) position);
-                        tvMiniTime.setText(formatTime(position) + " / " + formatTime(duration));
-                    }
-                }
-                seekHandler.postDelayed(this, 500);
+        seekRunnable = () -> {
+            if (player != null && player.isPlaying()) {
+                seekBarMini.setProgress((int) player.getCurrentPosition());
+                tvMiniTime.setText(formatTime(player.getCurrentPosition()) + " / " + formatTime(player.getDuration()));
             }
+            seekHandler.postDelayed(seekRunnable, 500);
         };
         seekHandler.post(seekRunnable);
     }
 
-    private void stopSeekBarUpdate() {
-        if (seekHandler != null && seekRunnable != null) {
-            seekHandler.removeCallbacks(seekRunnable);
-        }
-    }
+    private void stopSeekBarUpdate() { if (seekHandler != null && seekRunnable != null) seekHandler.removeCallbacks(seekRunnable); }
 
     private String formatTime(long millis) {
-        long minutes = TimeUnit.MILLISECONDS.toMinutes(millis);
-        long seconds = TimeUnit.MILLISECONDS.toSeconds(millis) - TimeUnit.MINUTES.toSeconds(minutes);
-        return String.format(Locale.getDefault(), "%d:%02d", minutes, seconds);
+        return String.format(Locale.getDefault(), "%d:%02d", TimeUnit.MILLISECONDS.toMinutes(millis), 
+                TimeUnit.MILLISECONDS.toSeconds(millis) - TimeUnit.MINUTES.toSeconds(TimeUnit.MILLISECONDS.toMinutes(millis)));
     }
 
-    // ========== UTILIDADES ==========
-
-    private void notifyAdapter() {
-        if (adapter != null) {
-            adapter.notifyDataSetChanged();
-        }
-    }
-
+    private void notifyAdapter() { if (adapter != null) adapter.notifyDataSetChanged(); }
     private void ocultarTeclado() {
         InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-        if (imm != null && getCurrentFocus() != null) {
-            imm.hideSoftInputFromWindow(getCurrentFocus().getWindowToken(), 0);
-        }
+        if (imm != null && getCurrentFocus() != null) imm.hideSoftInputFromWindow(getCurrentFocus().getWindowToken(), 0);
     }
 
     private void verificarPermisos() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this,
-                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_CODE);
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_CODE);
             }
         }
     }
 
-    @Override
-    protected void onPause() {
-        super.onPause();
-        // No detenemos el player al pausar la activity — solo al destruir
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        stopSeekBarUpdate();
-        if (player != null) {
-            player.release();
-            player = null;
-        }
-    }
+    @Override protected void onDestroy() { super.onDestroy(); stopSeekBarUpdate(); if (player != null) player.release(); }
 }

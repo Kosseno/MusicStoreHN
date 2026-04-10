@@ -2,7 +2,10 @@ package uth.pmo1.musicstorehn;
 
 import android.Manifest;
 import android.app.AlertDialog;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.ProgressDialog;
+import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
@@ -21,6 +24,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.NotificationCompat;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
@@ -37,20 +41,19 @@ import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
-import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.storage.FirebaseStorage;
 import com.google.firebase.storage.StorageReference;
 import com.karumi.dexter.Dexter;
 import com.karumi.dexter.PermissionToken;
-import com.karumi.dexter.listener.PermissionDeniedResponse;
-import com.karumi.dexter.listener.PermissionGrantedResponse;
 import com.karumi.dexter.listener.PermissionRequest;
 import com.karumi.dexter.listener.multi.MultiplePermissionsListener;
-import com.karumi.dexter.listener.single.PermissionListener;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
 
 import es.dmoral.toasty.Toasty;
 
@@ -82,7 +85,7 @@ public class FeedGrupoActivity extends AppCompatActivity {
         grupoNombre = getIntent().getStringExtra("grupoNombre");
 
         if (grupoId == null || grupoId.isEmpty()) {
-            Toasty.error(this, "Error: grupo no encontrado", Toast.LENGTH_SHORT).show();
+            Toasty.error(this, "Error: grupo no encontrado").show();
             finish();
             return;
         }
@@ -106,17 +109,55 @@ public class FeedGrupoActivity extends AppCompatActivity {
         cargarContenido();
         contarMiembros();
         
-        // El permiso se pide ahora al iniciar la app (BienvenidaActivity)
+        // Escuchar novedades del grupo para notificar automáticamente
+        escucharNovedadesGrupo();
 
         fabSubir.setOnClickListener(v -> {
             if (!esMiembro && !esCreador) {
-                Toasty.info(this, "Únete al grupo para subir contenido", Toast.LENGTH_SHORT).show();
+                Toasty.info(this, "Únete al grupo para subir contenido").show();
                 return;
             }
             validarPermisosYSubir();
         });
         btnUnirseSalir.setOnClickListener(v -> gestionarMembresia());
         btnEliminar.setOnClickListener(v -> confirmarEliminacion());
+    }
+
+    private void escucharNovedadesGrupo() {
+        dbRef.child("Grupos").child(grupoId).child("ultimaNovedad").addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                if (snapshot.exists()) {
+                    String mensaje = snapshot.child("mensaje").getValue(String.class);
+                    String autorId = snapshot.child("autorId").getValue(String.class);
+                    
+                    // Solo notificar si el mensaje es nuevo y no lo subí yo mismo
+                    if (autorId != null && !autorId.equals(currentUserId)) {
+                        mostrarNotificacionLocal("Novedad en " + grupoNombre, mensaje);
+                    }
+                }
+            }
+            @Override public void onCancelled(@NonNull DatabaseError error) {}
+        });
+    }
+
+    private void mostrarNotificacionLocal(String titulo, String cuerpo) {
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        String channelId = "grupo_notifications";
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(channelId, "Avisos de Grupo", NotificationManager.IMPORTANCE_HIGH);
+            if (nm != null) nm.createNotificationChannel(channel);
+        }
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, channelId)
+                .setSmallIcon(R.drawable.baseline_notifications_active_24)
+                .setContentTitle(titulo)
+                .setContentText(cuerpo)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH);
+
+        if (nm != null) nm.notify(new Random().nextInt(1000), builder.build());
     }
 
     private void initViews() {
@@ -185,10 +226,9 @@ public class FeedGrupoActivity extends AppCompatActivity {
                 if (esCreador) {
                     btnEliminar.setVisibility(View.VISIBLE); fabSubir.setVisibility(View.VISIBLE);
                     esMiembro = true; btnUnirseSalir.setVisibility(View.GONE);
-                    adapter.setEsCreadorGrupo(true); invalidateOptionsMenu();
-                    suscribirATopico();
+                    adapter.setEsCreadorGrupo(true);
                 } else {
-                    btnEliminar.setVisibility(View.GONE); adapter.setEsCreadorGrupo(false);
+                    btnEliminar.setVisibility(View.GONE);
                     dbRef.child("Grupos").child(grupoId).child("miembros").child(currentUserId)
                             .addValueEventListener(new ValueEventListener() {
                                 @Override
@@ -196,8 +236,6 @@ public class FeedGrupoActivity extends AppCompatActivity {
                                     esMiembro = snapshot.exists();
                                     btnUnirseSalir.setText(esMiembro ? "Salir del Grupo" : "Unirse al Grupo");
                                     fabSubir.setVisibility(esMiembro ? View.VISIBLE : View.GONE);
-                                    if (esMiembro) suscribirATopico();
-                                    else desuscribirDeTopico();
                                 }
                                 @Override public void onCancelled(@NonNull DatabaseError error) {}
                             });
@@ -207,28 +245,17 @@ public class FeedGrupoActivity extends AppCompatActivity {
         });
     }
 
-    private void suscribirATopico() {
-        FirebaseMessaging.getInstance().subscribeToTopic("grupo_" + grupoId)
-                .addOnCompleteListener(task -> {
-                    if (task.isSuccessful()) Log.d("FCM", "Suscrito al tópico: grupo_" + grupoId);
-                });
-    }
-
-    private void desuscribirDeTopico() {
-        FirebaseMessaging.getInstance().unsubscribeFromTopic("grupo_" + grupoId);
-    }
-
     private void gestionarMembresia() {
         if (currentUserId.isEmpty()) return;
         DatabaseReference miembroRef = dbRef.child("Grupos").child(grupoId).child("miembros").child(currentUserId);
         if (esMiembro) {
             new AlertDialog.Builder(this).setTitle("Salir").setMessage("¿Salir de " + grupoNombre + "?")
                     .setPositiveButton("Salir", (d, w) -> miembroRef.removeValue().addOnSuccessListener(unused -> {
-                        desuscribirDeTopico(); Toasty.info(this, "Has salido", Toast.LENGTH_SHORT).show();
+                        Toasty.info(this, "Has salido").show();
                     })).setNegativeButton("Cancelar", null).show();
         } else {
             miembroRef.setValue(userName).addOnSuccessListener(unused -> {
-                suscribirATopico(); Toasty.success(this, "¡Te has unido!", Toast.LENGTH_SHORT).show();
+                Toasty.success(this, "¡Te has unido!").show();
             });
         }
     }
@@ -285,13 +312,25 @@ public class FeedGrupoActivity extends AppCompatActivity {
         pd.show();
         
         StorageReference storageRef = FirebaseStorage.getInstance().getReference().child("Multimedia").child(grupoId).child(System.currentTimeMillis() + "_" + fileName);
-        storageRef.putFile(fileUri).addOnProgressListener(s -> {
-            pd.setMessage("Progreso: " + (int) ((100.0 * s.getBytesTransferred()) / s.getTotalByteCount()) + "%");
-        }).continueWithTask(task -> storageRef.getDownloadUrl()).addOnCompleteListener(task -> {
+        storageRef.putFile(fileUri).addOnCompleteListener(task -> {
             pd.dismiss();
-            if (task.isSuccessful()) guardarEnBD(fileName, task.getResult().toString(), finalType);
-            else Toasty.error(this, "Error al subir: " + task.getException().getMessage(), Toast.LENGTH_LONG).show();
+            if (task.isSuccessful()) {
+                storageRef.getDownloadUrl().addOnSuccessListener(uri -> {
+                    guardarEnBD(fileName, uri.toString(), finalType);
+                    notificarAutomaticamente(fileName); // ✅ Notificación automática
+                });
+            } else Toasty.error(this, "Error al subir").show();
         });
+    }
+
+    private void notificarAutomaticamente(String nombreArchivo) {
+        // Escribir novedad en el grupo para que los demás la detecten
+        Map<String, Object> novedad = new HashMap<>();
+        novedad.put("mensaje", userName + " subió: " + nombreArchivo);
+        novedad.put("autorId", currentUserId);
+        novedad.put("timestamp", System.currentTimeMillis());
+        
+        dbRef.child("Grupos").child(grupoId).child("ultimaNovedad").setValue(novedad);
     }
 
     private String obtenerNombreArchivo(Uri uri) {
@@ -302,17 +341,14 @@ public class FeedGrupoActivity extends AppCompatActivity {
                     int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
                     if (nameIndex != -1) result = cursor.getString(nameIndex);
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
+            } catch (Exception e) { e.printStackTrace(); }
         }
         if (result == null) {
             result = uri.getPath();
             int cut = result.lastIndexOf('/');
             if (cut != -1) result = result.substring(cut + 1);
         }
-        if (result == null || result.isEmpty()) result = "archivo_" + System.currentTimeMillis();
-        return result;
+        return result != null ? result : "archivo_" + System.currentTimeMillis();
     }
 
     private void guardarEnBD(String nombre, String url, String tipo) {
@@ -320,7 +356,7 @@ public class FeedGrupoActivity extends AppCompatActivity {
         if (id == null) return;
         Multimedia m = new Multimedia(id, nombre, url, tipo, currentUserId, userName, "grupo", grupoId, System.currentTimeMillis());
         dbRef.child("Multimedia").child(id).setValue(m).addOnCompleteListener(task -> {
-            if (task.isSuccessful()) Toasty.success(this, "¡Compartido!", Toast.LENGTH_SHORT).show();
+            if (task.isSuccessful()) Toasty.success(this, "¡Compartido!").show();
         });
     }
 

@@ -54,7 +54,6 @@
                 android:textSize="14sp" />
         </LinearLayout>
 
-        <!-- ✅ NUEVO: ProgressBar circular para estado "descargando" -->
         <ProgressBar
             android:id="@+id/progressDownload"
             android:layout_width="32dp"
@@ -64,7 +63,15 @@
             android:indeterminate="true"
             android:indeterminateTint="@color/primary" />
 
-        <!-- Ícono de acción (descargar / play / pause) -->
+        <ImageView
+            android:id="@+id/imgDelete"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="8dp"
+            android:visibility="gone"
+            app:tint="@color/error"
+            app:srcCompat="@android:drawable/ic_menu_delete" />
+
         <ImageView
             android:id="@+id/imgAction"
             android:layout_width="36dp"

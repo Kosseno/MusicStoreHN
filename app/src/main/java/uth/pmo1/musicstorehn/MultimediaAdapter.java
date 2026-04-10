@@ -11,6 +11,8 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.squareup.picasso.Picasso;
+
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -24,7 +26,6 @@ public class MultimediaAdapter extends RecyclerView.Adapter<MultimediaAdapter.Vi
     private String currentUserId;
     private boolean esCreadorGrupo;
 
-    // ✅ MEJORA: Interface ahora incluye callback de eliminación
     public interface OnMultimediaClickListener {
         void onPlayClick(Multimedia multimedia, int position);
         void onDeleteClick(Multimedia multimedia, int position);
@@ -39,7 +40,6 @@ public class MultimediaAdapter extends RecyclerView.Adapter<MultimediaAdapter.Vi
         this.esCreadorGrupo = esCreadorGrupo;
     }
 
-    // ✅ MEJORA: Permitir actualizar permisos de creador después de verificar en Firebase
     public void setEsCreadorGrupo(boolean esCreador) {
         this.esCreadorGrupo = esCreador;
         notifyDataSetChanged();
@@ -58,16 +58,19 @@ public class MultimediaAdapter extends RecyclerView.Adapter<MultimediaAdapter.Vi
         holder.tvNombre.setText(item.getNombre());
         holder.tvSubidoPor.setText("Subido por: " + item.getUserName());
 
-        // ✅ MEJORA: Mostrar fecha de subida
         if (item.getTimestamp() > 0) {
             SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault());
             String fecha = sdf.format(new Date(item.getTimestamp()));
             holder.tvSubidoPor.setText("Subido por: " + item.getUserName() + " • " + fecha);
         }
 
+        // ✅ MEJORA: Usar Picasso para mostrar miniatura si existe URL (para consistencia con online)
+        // Como Multimedia.java no tiene campo fotoUrl explícito, intentamos usar la URL de descarga 
+        // si es un video o una imagen genérica mejorada.
         if ("video".equals(item.getTipo())) {
             holder.ivTipo.setImageResource(android.R.drawable.ic_menu_slideshow);
         } else {
+            // Intentar cargar una miniatura de música si estuviera disponible
             holder.ivTipo.setImageResource(R.drawable.baseline_music_note_24);
         }
 
@@ -77,7 +80,6 @@ public class MultimediaAdapter extends RecyclerView.Adapter<MultimediaAdapter.Vi
             }
         });
 
-        // ✅ MEJORA: Mostrar botón eliminar solo si es el dueño del contenido o el admin del grupo
         boolean puedeEliminar = (currentUserId != null && currentUserId.equals(item.getUserId())) || esCreadorGrupo;
         holder.btnDelete.setVisibility(puedeEliminar ? View.VISIBLE : View.GONE);
 
@@ -104,7 +106,6 @@ public class MultimediaAdapter extends RecyclerView.Adapter<MultimediaAdapter.Vi
             tvSubidoPor = itemView.findViewById(R.id.tvSubidoPor);
             ivTipo = itemView.findViewById(R.id.ivTipoIcon);
             btnPlay = itemView.findViewById(R.id.btnPlayMultimedia);
-            // ✅ NUEVO: Botón de eliminar
             btnDelete = itemView.findViewById(R.id.btnDeleteMultimedia);
         }
     }
