@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
@@ -33,5 +34,22 @@
             android:inputType="textMultiLine"
             android:minLines="3" />
     </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.switchmaterial.SwitchMaterial
+        android:id="@+id/swPrivado"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Grupo Privado"
+        android:textColor="@color/text_primary"
+        app:useMaterialThemeColors="true" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Los grupos privados solo son visibles para sus miembros."
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp"
+        android:layout_marginStart="4dp" />
 
 </LinearLayout>

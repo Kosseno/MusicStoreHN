@@ -6,19 +6,20 @@ public class Grupo {
     private String descripcion;
     private String creadorId;
     private String creadorNombre;
-    // ✅ MEJORA: Añadido timestamp para ordenar grupos por fecha de creación
     private long creadoEn;
+    private boolean esPrivado; // ✅ NUEVO: Campo para privacidad
 
     public Grupo() {
     }
 
-    public Grupo(String id, String nombre, String descripcion, String creadorId, String creadorNombre, long creadoEn) {
+    public Grupo(String id, String nombre, String descripcion, String creadorId, String creadorNombre, long creadoEn, boolean esPrivado) {
         this.id = id;
         this.nombre = nombre;
         this.descripcion = descripcion;
         this.creadorId = creadorId;
         this.creadorNombre = creadorNombre;
         this.creadoEn = creadoEn;
+        this.esPrivado = esPrivado;
     }
 
     public String getId() { return id; }
@@ -38,4 +39,7 @@ public class Grupo {
 
     public long getCreadoEn() { return creadoEn; }
     public void setCreadoEn(long creadoEn) { this.creadoEn = creadoEn; }
+
+    public boolean isEsPrivado() { return esPrivado; }
+    public void setEsPrivado(boolean esPrivado) { this.esPrivado = esPrivado; }
 }

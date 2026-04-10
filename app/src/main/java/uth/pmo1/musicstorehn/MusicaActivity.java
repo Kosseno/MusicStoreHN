@@ -27,6 +27,7 @@ import android.widget.Toast;
 
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
+import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
@@ -56,6 +57,7 @@ public class MusicaActivity extends AppCompatActivity {
     
     private ExoPlayer player;
     private PlayerView playerView;
+    private String currentUserId;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,6 +66,9 @@ public class MusicaActivity extends AppCompatActivity {
 
         listviewMusic = findViewById(R.id.listviewMusic);
         playerView = findViewById(R.id.player_view);
+
+        currentUserId = FirebaseAuth.getInstance().getCurrentUser() != null ? 
+                FirebaseAuth.getInstance().getCurrentUser().getUid() : null;
 
         initializePlayer();
 
@@ -99,8 +104,10 @@ public class MusicaActivity extends AppCompatActivity {
     }
 
     private void recuperarCanciones() {
+        if (currentUserId == null) return;
+
         DatabaseReference databaseReference = FirebaseDatabase.getInstance().getReference("Cancion");
-        databaseReference.addValueEventListener(new ValueEventListener() {
+        databaseReference.orderByChild("userId").equalTo(currentUserId).addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
                 arrayListNombreCanciones.clear();
@@ -170,10 +177,11 @@ public class MusicaActivity extends AppCompatActivity {
     }
 
     private void subirCancionFirebase() {
-        if (uri == null) return;
+        if (uri == null || currentUserId == null) return;
 
         StorageReference storageReference = FirebaseStorage.getInstance().getReference()
                 .child("Cancion")
+                .child(currentUserId)
                 .child(System.currentTimeMillis() + "_" + nombreCancion);
 
         ProgressDialog progressDialog = new ProgressDialog(this);
@@ -204,7 +212,8 @@ public class MusicaActivity extends AppCompatActivity {
     }
 
     private void enviarDetallesDB(String url) {
-        Cancion cancionObj = new Cancion(nombreCancion, url);
+        if (currentUserId == null) return;
+        Cancion cancionObj = new Cancion(nombreCancion, url, currentUserId);
         FirebaseDatabase.getInstance().getReference("Cancion").push().setValue(cancionObj)
                 .addOnCompleteListener(task -> {
                     if (task.isSuccessful()) {

@@ -19,6 +19,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.google.android.material.chip.Chip;
 import com.google.android.material.chip.ChipGroup;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.google.android.material.switchmaterial.SwitchMaterial;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.database.DataSnapshot;
@@ -43,7 +44,6 @@ public class GruposActivity extends AppCompatActivity {
     private String userName = "Usuario";
     private String currentUserId = "";
 
-    // ✅ NUEVO: Filtros y búsqueda
     private ChipGroup chipGroupFiltros;
     private Chip chipTodos, chipMisGrupos, chipMiembro;
     private EditText etBuscarGrupo;
@@ -95,7 +95,6 @@ public class GruposActivity extends AppCompatActivity {
         rvGrupos.setAdapter(adapter);
     }
 
-    // ✅ NUEVO: Filtros con Chips
     private void setupFiltros() {
         if (chipTodos != null) {
             chipTodos.setOnClickListener(v -> {
@@ -117,7 +116,6 @@ public class GruposActivity extends AppCompatActivity {
         }
     }
 
-    // ✅ NUEVO: Búsqueda en tiempo real
     private void setupBusqueda() {
         if (etBuscarGrupo == null) return;
 
@@ -133,7 +131,6 @@ public class GruposActivity extends AppCompatActivity {
         });
     }
 
-    // ✅ NUEVO: Lógica de filtrado combinada (filtro + búsqueda)
     private void aplicarFiltros() {
         String busqueda = (etBuscarGrupo != null) ? etBuscarGrupo.getText().toString().trim().toLowerCase() : "";
 
@@ -141,23 +138,27 @@ public class GruposActivity extends AppCompatActivity {
 
         for (Grupo grupo : listaGruposTodos) {
             boolean pasaFiltro = false;
+            boolean soyMiembro = esMiembroDe(grupo.getId());
+            boolean soyCreador = currentUserId.equals(grupo.getCreadorId());
+
+            // ✅ NUEVO: Lógica de Privacidad
+            // Si el grupo es privado, SOLO se muestra si soy miembro o creador
+            if (grupo.isEsPrivado() && !soyMiembro && !soyCreador) {
+                continue; 
+            }
 
             switch (filtroActual) {
                 case "todos":
                     pasaFiltro = true;
                     break;
                 case "creados":
-                    pasaFiltro = currentUserId.equals(grupo.getCreadorId());
+                    pasaFiltro = soyCreador;
                     break;
                 case "miembro":
-                    // Se verificará con datos cacheados — los grupos donde soy miembro
-                    // se marcan durante la carga
-                    pasaFiltro = grupo.getCreadorId() != null &&
-                            (currentUserId.equals(grupo.getCreadorId()) || esMiembroDe(grupo.getId()));
+                    pasaFiltro = soyMiembro;
                     break;
             }
 
-            // Aplicar búsqueda por nombre
             if (pasaFiltro && !busqueda.isEmpty()) {
                 String nombre = grupo.getNombre() != null ? grupo.getNombre().toLowerCase() : "";
                 String desc = grupo.getDescripcion() != null ? grupo.getDescripcion().toLowerCase() : "";
@@ -171,7 +172,6 @@ public class GruposActivity extends AppCompatActivity {
 
         adapter.notifyDataSetChanged();
 
-        // ✅ MEJORA: Estado vacío contextual
         if (tvEmptyGrupos != null) {
             if (listaGruposFiltrada.isEmpty()) {
                 tvEmptyGrupos.setVisibility(View.VISIBLE);
@@ -182,7 +182,7 @@ public class GruposActivity extends AppCompatActivity {
                 } else if ("miembro".equals(filtroActual)) {
                     tvEmptyGrupos.setText("No te has unido a ningún grupo aún.\n\nExplora los grupos disponibles.");
                 } else {
-                    tvEmptyGrupos.setText("No hay grupos disponibles.\n\nSé el primero en crear uno.");
+                    tvEmptyGrupos.setText("No hay grupos públicos disponibles.\n\nSé el primero en crear uno.");
                 }
             } else {
                 tvEmptyGrupos.setVisibility(View.GONE);
@@ -190,7 +190,6 @@ public class GruposActivity extends AppCompatActivity {
         }
     }
 
-    // Cache simple de membresías
     private ArrayList<String> gruposDondeSoyMiembro = new ArrayList<>();
 
     private boolean esMiembroDe(String grupoId) {
@@ -223,7 +222,6 @@ public class GruposActivity extends AppCompatActivity {
                     if (grupo != null) {
                         listaGruposTodos.add(0, grupo); // Más recientes primero
 
-                        // Cachear membresía
                         if (currentUserId.equals(grupo.getCreadorId())) {
                             gruposDondeSoyMiembro.add(grupo.getId());
                         } else if (ds.child("miembros").hasChild(currentUserId)) {
@@ -247,30 +245,32 @@ public class GruposActivity extends AppCompatActivity {
         View view = LayoutInflater.from(this).inflate(R.layout.dialog_crear_grupo, null);
         EditText etNombre = view.findViewById(R.id.etNombreGrupo);
         EditText etDesc = view.findViewById(R.id.etDescripcionGrupo);
+        SwitchMaterial swPrivado = view.findViewById(R.id.swPrivado);
 
         builder.setView(view)
                 .setTitle("Crear Nuevo Grupo")
                 .setPositiveButton("Crear", (dialog, which) -> {
                     String nombre = etNombre.getText().toString().trim();
                     String desc = etDesc.getText().toString().trim();
+                    boolean esPrivado = swPrivado.isChecked();
 
                     if (nombre.isEmpty() || nombre.length() < 3) {
                         Toasty.warning(this, "El nombre debe tener al menos 3 caracteres", Toast.LENGTH_SHORT).show();
                         return;
                     }
-                    crearGrupo(nombre, desc);
+                    crearGrupo(nombre, desc, esPrivado);
                 })
                 .setNegativeButton("Cancelar", null)
                 .show();
     }
 
-    private void crearGrupo(String nombre, String descripcion) {
+    private void crearGrupo(String nombre, String descripcion, boolean esPrivado) {
         String id = dbRef.child("Grupos").push().getKey();
         FirebaseUser user = mAuth.getCurrentUser();
         if (id == null || user == null) return;
 
         String uid = user.getUid();
-        Grupo nuevoGrupo = new Grupo(id, nombre, descripcion, uid, userName, System.currentTimeMillis());
+        Grupo nuevoGrupo = new Grupo(id, nombre, descripcion, uid, userName, System.currentTimeMillis(), esPrivado);
 
         dbRef.child("Grupos").child(id).setValue(nuevoGrupo).addOnCompleteListener(task -> {
             if (task.isSuccessful()) {
